@@ -21,7 +21,7 @@ N_MELS = 64          # Default from train2.py AudioDataset
 # Load the pre-trained model
 def load_model(model_path, device):
     """Loads the pre-trained FullAutoEncoder model."""
-    model = FullAutoEncoder(n_mels=N_MELS).to(device)
+    model = FullAutoEncoder().to(device)
     try:
         model.load_state_dict(torch.load(model_path, map_location=device))
         model.eval()
