@@ -1,87 +1,149 @@
 import torch
 import torchaudio
-import torch.nn as nn
-import numpy as np
-from torchaudio.transforms import (
-    MelSpectrogram, AmplitudeToDB, InverseMelScale, GriffinLim
-)
-from train2 import UNet  # Nowy model U-Net
+import time
+from torchaudio.transforms import MelSpectrogram, AmplitudeToDB
+import torch.nn as nn # Required for model class definitions in train2
 
+# Attempt to import model classes from train2.py
+# Ensure train2.py is in the same directory or Python path
+try:
+    from train2 import AudioEncoder, AudioCompressor, AudioDecompressor, AudioDecoder, FullAutoEncoder
+except ImportError as e:
+    print(f"Error importing from train2.py: {e}")
+    print("Please ensure train2.py is in the same directory as inference.py and contains the necessary model definitions.")
+    print("You might need to add placeholder classes if train2.py cannot be imported directly in this environment.")
+    # Add placeholder classes if running in an environment where train2.py is not accessible
+    # This is a fallback for environments where the tool might not run train2.py's imports correctly.
+    class AudioEncoder(nn.Module):
+        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
+        def forward(self, x): return x
+    class AudioCompressor(nn.Module):
+        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
+        def forward(self, x): return x
+    class AudioDecompressor(nn.Module):
+        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
+        def forward(self, x): return x
+    class AudioDecoder(nn.Module):
+        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
+        def forward(self, x): return x
+    class FullAutoEncoder(nn.Module):
+        def __init__(self, encoder, compressor, decompressor, decoder):
+            super().__init__()
+            self.encoder = encoder
+            self.compressor = compressor
+            self.decompressor = decompressor
+            self.decoder = decoder
+        def forward(self, x):
+            encoded = self.encoder(x)
+            compressed = self.compressor(encoded)
+            decompressed = self.decompressor(compressed)
+            reconstructed = self.decoder(decompressed)
+            return reconstructed, compressed, encoded, decompressed
 
-def encode_audio(
-    input_file="example.mp3",
-    encoded_file="encoded_tensor.pt",
-    sample_rate=16000,
-    n_mels=64,
-    n_fft=1024,
-    hop_length=256
-):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNet(in_channels=1, out_channels=1).to(device)
-    state_dict = torch.load("/home/inf151841/nanochi/ai2/ai/unet_model.pt", map_location=device)
-    model.load_state_dict(state_dict, strict=False)
-    model.eval()
+# Configuration
+MODEL_PATH = "unet_model.pt"  # Model saved by train2.py
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+SAMPLE_RATE = 16000  # Default from train2.py AudioDataset
+N_MELS = 64          # Default from train2.py AudioDataset
 
-    mel_transform = MelSpectrogram(sample_rate=sample_rate, n_mels=n_mels, n_fft=n_fft, hop_length=hop_length)
-    db_transform = AmplitudeToDB()
+def load_and_preprocess_audio(file_path, sample_rate=SAMPLE_RATE, n_mels=N_MELS):
+    """Loads an audio file, converts to mono, resamples, and computes Mel spectrogram."""
+    try:
+        waveform, sr = torchaudio.load(file_path)
+    except Exception as e:
+        print(f"Error loading audio file {file_path}: {e}")
+        print("Please ensure a valid audio file (e.g., 'example.mp3') exists at the specified path.")
+        return None
 
-    waveform, sr = torchaudio.load(input_file)
+    # Convert to mono
     if waveform.shape[0] > 1:
         waveform = waveform.mean(dim=0, keepdim=True)
+
+    # Resample if necessary
     if sr != sample_rate:
-        waveform = torchaudio.functional.resample(waveform, sr, sample_rate)
+        resampler = torchaudio.transforms.Resample(sr, sample_rate)
+        waveform = resampler(waveform)
+
+    # Mel spectrogram transforms
+    mel_transform = MelSpectrogram(sample_rate=sample_rate, n_mels=n_mels, hop_length=512, win_length=1024) # Typical hop/win lengths
+    db_transform = AmplitudeToDB()
 
     mel = mel_transform(waveform)
-    mel_db = db_transform(mel).to(device)      # [1, n_mels, time]
-    mel_db = mel_db.unsqueeze(0)              # [1, 1, n_mels, time]
+    mel_db = db_transform(mel)
+
+    # Reshape to match model input: (batch, channels, n_mels, time_frames)
+    # train2.py training loop uses .unsqueeze(1) on dataset output.
+    return mel_db.unsqueeze(0).to(DEVICE)
+
+
+def main_inference(audio_file_path="example.mp3"):
+    print(f"Using device: {DEVICE}")
+    print(f"Loading model from: {MODEL_PATH}")
+
+    # Initialize model components (as done in train2.py)
+    try:
+        model_encoder = AudioEncoder().to(DEVICE)
+        model_compressor = AudioCompressor().to(DEVICE)
+        model_decompressor = AudioDecompressor().to(DEVICE)
+        model_decoder = AudioDecoder().to(DEVICE)
+
+        model = FullAutoEncoder(
+            model_encoder,
+            model_compressor,
+            model_decompressor,
+            model_decoder
+        ).to(DEVICE)
+    except Exception as e:
+        print(f"Error initializing model components: {e}")
+        print("This might be due to issues with importing from train2.py or the placeholder classes.")
+        return
+
+    try:
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+    except FileNotFoundError:
+        print(f"Model file not found: {MODEL_PATH}")
+        print("Please ensure the model is trained and saved correctly by train2.py.")
+        return
+    except Exception as e:
+        print(f"Error loading model state_dict: {e}")
+        return
+
+    model.eval()
+
+    # Load and preprocess audio
+    print(f"Loading and preprocessing audio: {audio_file_path}")
+    input_tensor = load_and_preprocess_audio(audio_file_path)
+    if input_tensor is None:
+        return
+
+    print(f"Input tensor shape: {input_tensor.shape}")
 
     with torch.no_grad():
-        output_db = model(mel_db)  # [1, 1, n_mels, time]
+        # Encoding part
+        # Corresponds to: encoded = self.encoder(x); compressed = self.compressor(encoded)
+        start_time_encode = time.perf_counter()
+        encoded_output = model.encoder(input_tensor)
+        compressed_representation = model.compressor(encoded_output)
+        end_time_encode = time.perf_counter()
+        encode_time = end_time_encode - start_time_encode
+        print(f"Encoding time: {encode_time:.6f} seconds")
+        print(f"Shape after encoder: {encoded_output.shape}")
+        print(f"Shape after compressor (compressed representation): {compressed_representation.shape}")
 
-    torch.save(output_db.cpu(), encoded_file)
-    print(f"Saved encoded tensor to {encoded_file}")
 
-
-def decode_audio(
-    encoded_file="encoded_tensor.pt",
-    output_file="reconstructed.mp3",
-    sample_rate=16000,
-    n_mels=64,
-    n_fft=1024,
-    hop_length=256
-):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    output_db = torch.load(encoded_file, map_location=device)  # [1, 1, n_mels, time]
-
-    output_db_cpu = output_db.squeeze(0).squeeze(0).cpu()      # [n_mels, time]
-    output_ampl = torch.pow(10.0, (output_db_cpu / 20.0))
-
-    inv_melscale = InverseMelScale(
-        n_stft=n_fft // 2 + 1,
-        n_mels=n_mels,
-        sample_rate=sample_rate,
-    )
-    mag_spec = inv_melscale(output_ampl.unsqueeze(0))
-    griffinlim = GriffinLim(n_fft=n_fft, hop_length=hop_length)
-    reconstructed_wave = griffinlim(mag_spec)
-
-    torchaudio.save(output_file, reconstructed_wave, sample_rate)
-    print(f"Reconstructed audio saved to {output_file}")
+        # Decoding part
+        # Corresponds to: decompressed = self.decompressor(compressed); reconstructed = self.decoder(decompressed)
+        start_time_decode = time.perf_counter()
+        decompressed_output = model.decompressor(compressed_representation)
+        reconstructed_mel = model.decoder(decompressed_output)
+        end_time_decode = time.perf_counter()
+        decode_time = end_time_decode - start_time_decode
+        print(f"Decoding time: {decode_time:.6f} seconds")
+        print(f"Shape after decompressor: {decompressed_output.shape}")
+        print(f"Shape after decoder (reconstructed Mel): {reconstructed_mel.shape}")
 
 if __name__ == "__main__":
-    encode_audio(
-        input_file="example.mp3",
-        encoded_file="encoded_tensor.pt",
-        sample_rate=16000,
-        n_mels=64,
-        n_fft=1024,
-        hop_length=256
-    )
-    decode_audio(
-        encoded_file="encoded_tensor.pt",
-        output_file="reconstructed.mp3",
-        sample_rate=16000,
-        n_mels=64,
-        n_fft=1024,
-        hop_length=256
-    )
+    # Assuming 'example.mp3' exists in the same directory as the script,
+    # or provide a full path to an audio file.
+    # The workspace structure indicates 'ai/example.mp3' exists.
+    main_inference(audio_file_path="/home/inf151841/nanochi/ai2/ai/example.mp3")
