@@ -229,7 +229,7 @@ def main():
     # Parametry wg poprzedniego kodu
     batch_size = 256
     num_epochs = 10
-    learning_rate = 3e-3
+    learning_rate = 3e-2
     train_val_split = 0.9
 
     # Załadowanie datasetu

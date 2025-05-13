@@ -35,7 +35,10 @@ def load_and_preprocess_audio(file_path, sample_rate=SAMPLE_RATE, n_mels=N_MELS)
         waveform = resampler(waveform)
 
     # Mel spectrogram transforms
-    mel_transform = MelSpectrogram(sample_rate=sample_rate, n_mels=n_mels, hop_length=512, win_length=1024) # Typical hop/win lengths
+    # Ensure n_fft >= win_length. Set n_fft = win_length if not otherwise specified.
+    # The error indicated n_fft=400 and win_length=1024.
+    # Default n_fft for MelSpectrogram is 400.
+    mel_transform = MelSpectrogram(sample_rate=sample_rate, n_mels=n_mels, n_fft=1024, hop_length=512, win_length=1024)
     db_transform = AmplitudeToDB()
 
     mel = mel_transform(waveform)
