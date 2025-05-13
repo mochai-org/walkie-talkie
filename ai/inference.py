@@ -117,7 +117,7 @@ def main_inference(audio_file_path="example.mp3"):
 
         # Convert back to waveform (if needed)
 
-        waveform = torchaudio.functional.inversespectrogram(
+        waveform = torchaudio.functional.inverse_spectrogram(
             reconstructed_mel.squeeze(0).cpu(),  # Remove batch dimension
             n_fft=1024,
             win_length=1024,
