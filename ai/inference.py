@@ -1,7 +1,7 @@
 import torch
 import torchaudio
 import time
-from torchaudio.transforms import MelSpectrogram, AmplitudeToDB
+from torchaudio.transforms import MelSpectrogram, AmplitudeToDB, DB_To_Amplitude, InverseMelScale, GriffinLim
 import torch.nn as nn # Required for model class definitions in train2
 
 # Attempt to import model classes from train2.py
@@ -126,7 +126,7 @@ def main_inference(audio_file_path="example.mp3"):
         # 1. Convert from dB to Power Spectrogram
         # MelSpectrogram produces power spec, AmplitudeToDB converts power to dB.
         # DBToAmplitude(ref=1.0, power=1.0) inverts X_db = 10 * log10(X_power)
-        db_to_power_transform = torchaudio.transforms.DBToAmplitude(ref=1.0, power=1.0)
+        db_to_power_transform = torchaudio.transforms.DB_To_Amplitude(ref=1.0, power=1.0)
         reconstructed_power_mel_spec = db_to_power_transform(reconstructed_mel_squeezed)
 
         # 2. Convert from Mel scale to linear frequency scale
