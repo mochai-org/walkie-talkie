@@ -115,6 +115,22 @@ def main_inference(audio_file_path="example.mp3"):
         print(f"Shape after decompressor: {decompressed_output.shape}")
         print(f"Shape after decoder (reconstructed Mel): {reconstructed_mel.shape}")
 
+        # Convert back to waveform (if needed)
+
+        waveform = torchaudio.functional.inversespectrogram(
+            reconstructed_mel.squeeze(0).cpu(),  # Remove batch dimension
+            n_fft=1024,
+            win_length=1024,
+            hop_length=512,
+            center=True,
+            pad_mode='reflect',
+            normalized=False,
+            onesided=True
+        )
+        print(f"Reconstructed waveform shape: {waveform.shape}")
+        # Save or play the reconstructed waveform
+        torchaudio.save("reconstructed.wav", waveform, SAMPLE_RATE)
+
 if __name__ == "__main__":
     # Assuming 'example.mp3' exists in the same directory as the script,
     # or provide a full path to an audio file.
