@@ -1,7 +1,8 @@
 import torch
 import torchaudio
 import time
-from torchaudio.transforms import MelSpectrogram, AmplitudeToDB, DB_To_Amplitude, InverseMelScale, GriffinLim
+from torchaudio.transforms import MelSpectrogram, AmplitudeToDB, InverseMelScale, GriffinLim
+from torchaudio.functional import DB_To_Amplitude
 import torch.nn as nn # Required for model class definitions in train2
 
 # Attempt to import model classes from train2.py
