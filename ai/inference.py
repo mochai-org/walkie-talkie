@@ -116,4 +116,4 @@ if __name__ == "__main__":
     # Assuming 'example.mp3' exists in the same directory as the script,
     # or provide a full path to an audio file.
     # The workspace structure indicates 'ai/example.mp3' exists.
-    main_inference(audio_file_path="/home/inf151841/nanochi/ai2/ai/example.mp3")
+    main_inference(audio_file_path="example.mp3")
