@@ -1,0 +1,23 @@
+*.out
+
+input/
+last_best1/
+*.tar
+*.tar.gz
+*.zip
+*.tar.bz2
+*.tar.xz
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+
+# cpp
+*.o
+*.so
+*.a
+
