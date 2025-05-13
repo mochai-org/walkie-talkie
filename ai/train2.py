@@ -14,6 +14,20 @@ from tqdm import tqdm
 import torch.nn.functional as F
 
 # ------------------------------------------------------------------------
+# Custom collate function
+# ------------------------------------------------------------------------
+def custom_collate_fn(batch):
+    max_time = max(item.shape[-1] for item in batch)
+    padded_batch = []
+    for mel_db in batch:
+        time_dim = mel_db.shape[-1]
+        if time_dim < max_time:
+            pad_size = max_time - time_dim
+            mel_db = torch.nn.functional.pad(mel_db, (0, pad_size))
+        padded_batch.append(mel_db)
+    return torch.stack(padded_batch, dim=0)
+
+# ------------------------------------------------------------------------
 # Dataset z podstawową augmentacją i wygenerowanym podziałem train/val
 # ------------------------------------------------------------------------
 class AudioDataset(Dataset):
@@ -129,16 +143,19 @@ class AudioEncoder(nn.Module):
 class AudioCompressor(nn.Module):
     def __init__(self):
         super(AudioCompressor, self).__init__()
-        # Załóżmy, że końcowy wymiar z AudioEncoder to (128, 8, 8). Dostosuj do rzeczywistych rozmiarów.
+        # Add adaptive pooling to ensure fixed size before flattening
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((8, 8))  # Output HxW will be 8x8
+        # The flat_dim is now based on the output of adaptive_pool (128 channels * 8 * 8)
         self.flat_dim = 128 * 8 * 8
         self.fc_reduce1 = nn.Linear(self.flat_dim, 64)
         self.fc_reduce2 = nn.Linear(64, 2)
 
     def forward(self, x):
-        # x zakładamy jako [batch, 128, 8, 8]
-        x = x.view(x.size(0), -1)  # spłaszczenie
+        # x from encoder is [batch, 128, H_encoder_out, W_encoder_out_variable]
+        x = self.adaptive_pool(x)  # x becomes [batch, 128, 8, 8]
+        x = x.view(x.size(0), -1)  # Flatten; x is now [batch, 128*8*8]
         x = self.fc_reduce1(x)
-        z = self.fc_reduce2(x)     # wynik 2-float
+        z = self.fc_reduce2(x)     # Output is 2-float
         return z
 
 
@@ -211,7 +228,7 @@ def main():
 
     # Parametry wg poprzedniego kodu
     batch_size = 256
-    num_epochs = 300
+    num_epochs = 10
     learning_rate = 3e-3
     train_val_split = 0.9
 
@@ -227,12 +244,14 @@ def main():
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
+        collate_fn=custom_collate_fn,
         num_workers=52
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
+        collate_fn=custom_collate_fn,
         num_workers=52
     )
 
@@ -273,14 +292,19 @@ def main():
             with torch.amp.autocast(device_type=device.type, enabled=(device.type == 'cuda')):
                 reconstructed, compressed, encoded, decompressed = model(data)
                 
+                # Resize reconstructed to match data's shape for loss calculation
+                target_shape = (data.size(2), data.size(3)) # (height, width)
+                reconstructed_resized = F.interpolate(reconstructed, size=target_shape, mode='bilinear', align_corners=False)
+
                 # Loss rekonstrukcji
-                mse_rec = mse_crit(reconstructed, data)
-                l1_rec = l1_crit(reconstructed, data)
+                mse_rec = mse_crit(reconstructed_resized, data)
+                l1_rec = l1_crit(reconstructed_resized, data)
                 rec_loss = 0.7 * mse_rec + 0.3 * l1_rec
 
                 # Loss kompresji (porównanie zdekompresowanego z wyjściem encodera)
-                mse_comp = mse_crit(decompressed, encoded)
-                l1_comp = l1_crit(decompressed, encoded)
+                encoded_pooled_target = model.compressor.adaptive_pool(encoded)
+                mse_comp = mse_crit(decompressed, encoded_pooled_target)
+                l1_comp = l1_crit(decompressed, encoded_pooled_target)
                 comp_loss = 0.7 * mse_comp + 0.3 * l1_comp
 
                 # Łączny błąd
@@ -300,10 +324,16 @@ def main():
             for data in tqdm(val_loader, desc=f"Val Epoch {epoch}"):
                 data = data.to(device).unsqueeze(1)
                 with torch.amp.autocast(device_type=device.type, enabled=(device.type == 'cuda')):
-                    output, compressed = model(data)
-                    mse_loss = mse_crit(output, data)
-                    l1_loss = l1_crit(output, data)
-                    loss = 0.7 * mse_loss + 0.3 * l1_loss
+                    reconstructed_val, _, _, _ = model(data) 
+                    
+                    # Resize reconstructed_val to match data's shape for loss calculation
+                    target_shape_val = (data.size(2), data.size(3))
+                    reconstructed_val_resized = F.interpolate(reconstructed_val, size=target_shape_val, mode='bilinear', align_corners=False)
+
+                    # Loss for validation is typically reconstruction loss
+                    mse_val_loss = mse_crit(reconstructed_val_resized, data)
+                    l1_val_loss = l1_crit(reconstructed_val_resized, data)
+                    loss = 0.7 * mse_val_loss + 0.3 * l1_val_loss
                 val_loss += loss.item()
 
         val_loss /= len(val_loader)
