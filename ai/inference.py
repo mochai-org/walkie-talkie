@@ -6,39 +6,9 @@ import torch.nn as nn # Required for model class definitions in train2
 
 # Attempt to import model classes from train2.py
 # Ensure train2.py is in the same directory or Python path
-try:
-    from train2 import AudioEncoder, AudioCompressor, AudioDecompressor, AudioDecoder, FullAutoEncoder
-except ImportError as e:
-    print(f"Error importing from train2.py: {e}")
-    print("Please ensure train2.py is in the same directory as inference.py and contains the necessary model definitions.")
-    print("You might need to add placeholder classes if train2.py cannot be imported directly in this environment.")
-    # Add placeholder classes if running in an environment where train2.py is not accessible
-    # This is a fallback for environments where the tool might not run train2.py's imports correctly.
-    class AudioEncoder(nn.Module):
-        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
-        def forward(self, x): return x
-    class AudioCompressor(nn.Module):
-        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
-        def forward(self, x): return x
-    class AudioDecompressor(nn.Module):
-        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
-        def forward(self, x): return x
-    class AudioDecoder(nn.Module):
-        def __init__(self): super().__init__(); self.dummy = nn.Linear(1,1)
-        def forward(self, x): return x
-    class FullAutoEncoder(nn.Module):
-        def __init__(self, encoder, compressor, decompressor, decoder):
-            super().__init__()
-            self.encoder = encoder
-            self.compressor = compressor
-            self.decompressor = decompressor
-            self.decoder = decoder
-        def forward(self, x):
-            encoded = self.encoder(x)
-            compressed = self.compressor(encoded)
-            decompressed = self.decompressor(compressed)
-            reconstructed = self.decoder(decompressed)
-            return reconstructed, compressed, encoded, decompressed
+
+from train2 import AudioEncoder, AudioCompressor, AudioDecompressor, AudioDecoder, FullAutoEncoder
+
 
 # Configuration
 MODEL_PATH = "unet_model.pt"  # Model saved by train2.py
