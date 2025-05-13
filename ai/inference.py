@@ -1,7 +1,7 @@
 import torch
 import torchaudio
 import time
-from torchaudio.transforms import MelSpectrogram, AmplitudeToDB
+from torchaudio.transforms import MelSpectrogram, AmplitudeToDB, DBToAmplitude, InverseMelScale, GriffinLim
 import torch.nn as nn # Required for model class definitions in train2
 
 # Attempt to import model classes from train2.py
@@ -115,21 +115,60 @@ def main_inference(audio_file_path="example.mp3"):
         print(f"Shape after decompressor: {decompressed_output.shape}")
         print(f"Shape after decoder (reconstructed Mel): {reconstructed_mel.shape}")
 
-        # Convert back to waveform (if needed)
+        # Convert reconstructed Mel spectrogram back to waveform and save
+        print("Reconstructing waveform from Mel spectrogram...")
+        
+        # reconstructed_mel shape is (batch, channels, n_mels, time_frames)
+        # Assuming batch_size=1 and channels=1 as input is mono and unsqueezed to (1,1,H,W)
+        # Squeeze batch and channel dimensions: (n_mels, time_frames)
+        reconstructed_mel_squeezed = reconstructed_mel.squeeze(0).squeeze(0).cpu() 
 
-        waveform = torchaudio.functional.inverse_spectrogram(
-            reconstructed_mel.squeeze(0).cpu(),  # Remove batch dimension
-            n_fft=1024,
-            win_length=1024,
-            hop_length=512,
-            center=True,
-            pad_mode='reflect',
-            normalized=False,
-            onesided=True
+        # 1. Convert from dB to Power Spectrogram
+        # MelSpectrogram produces power spec, AmplitudeToDB converts power to dB.
+        # DBToAmplitude(ref=1.0, power=1.0) inverts X_db = 10 * log10(X_power)
+        db_to_power_transform = torchaudio.transforms.DBToAmplitude(ref=1.0, power=1.0)
+        reconstructed_power_mel_spec = db_to_power_transform(reconstructed_mel_squeezed)
+
+        # 2. Convert from Mel scale to linear frequency scale
+        # n_fft = 1024, so n_stft (number of linear frequency bins) = 1024 // 2 + 1 = 513
+        inverse_mel_scale_transform = torchaudio.transforms.InverseMelScale(
+            n_stft=1024 // 2 + 1, 
+            n_mels=N_MELS, 
+            sample_rate=SAMPLE_RATE,
+            norm="slaney", # Common normalization, check if matches MelSpectrogram if issues
+            mel_scale="slaney" # Common mel scale, check if matches MelSpectrogram
         )
-        print(f"Reconstructed waveform shape: {waveform.shape}")
-        # Save or play the reconstructed waveform
-        torchaudio.save("reconstructed.wav", waveform, SAMPLE_RATE)
+        reconstructed_linear_power_spec = inverse_mel_scale_transform(reconstructed_power_mel_spec)
+
+        # 3. Use Griffin-Lim to convert the linear power spectrogram to waveform
+        griffin_lim_transform = torchaudio.transforms.GriffinLim(
+            n_fft=1024, 
+            hop_length=512, 
+            win_length=1024, 
+            power=2.0 # Input is a power spectrogram
+        )
+        reconstructed_waveform = griffin_lim_transform(reconstructed_linear_power_spec)
+        
+        # Ensure waveform is 2D (channels, time) for saving. GriffinLim output is (time_samples).
+        # Add channel dimension for mono audio.
+        if reconstructed_waveform.ndim == 1:
+            reconstructed_waveform = reconstructed_waveform.unsqueeze(0)
+
+        # 4. Save the waveform
+        output_filename_mp3 = "reconstructed_audio.mp3"
+        output_filename_wav = "reconstructed_audio.wav"
+        try:
+            torchaudio.save(output_filename_mp3, reconstructed_waveform, SAMPLE_RATE)
+            print(f"Reconstructed audio saved to {output_filename_mp3}")
+        except Exception as e:
+            print(f"Error saving audio as MP3: {e}")
+            print(f"This might be due to torchaudio backend issues or ffmpeg not being available for MP3 encoding.")
+            print(f"Attempting to save as .wav instead: {output_filename_wav}")
+            try:
+                torchaudio.save(output_filename_wav, reconstructed_waveform, SAMPLE_RATE)
+                print(f"Reconstructed audio saved to {output_filename_wav}")
+            except Exception as e_wav:
+                print(f"Error saving audio as .wav: {e_wav}")
 
 if __name__ == "__main__":
     # Assuming 'example.mp3' exists in the same directory as the script,
